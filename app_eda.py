@@ -45,20 +45,23 @@ class Home:
         st.title("🏠 Home")
         if st.session_state.get("logged_in"):
             st.success(f"{st.session_state.get('user_email')}님 환영합니다.")
-
+        
+        # 페이지 이동 버튼 추가
+        st.markdown("[지역별 인구 분석 페이지로 이동](?page=eda)")  # Streamlit navigation query param
+        
         # Population Trends 데이터셋 출처 및 소개
         st.markdown("""
-                ---
-                **Population Trends 데이터셋**  
-                - 제공처: 통계청 KOSIS  
-                - 설명: 전국 및 시·도별 연도별 인구, 출생아 수, 사망자 수를 기록한 데이터  
-                - 주요 변수:  
-                  - `연도`: 기준 연도  
-                  - `지역`: 전국 또는 17개 시·도  
-                  - `인구`: 해당 연도의 총 인구 수  
-                  - `출생아수(명)`: 해당 연도 출생한 신생아 수  
-                  - `사망자수(명)`: 해당 연도 사망자 수  
-                """)
+        ---
+        **Population Trends 데이터셋**  
+        - 제공처: 통계청 KOSIS  
+        - 설명: 전국 및 시·도별 연도별 인구, 출생아 수, 사망자 수 데이터를 포함합니다.  
+        - 주요 변수:  
+          - `연도`: 기준 연도  
+          - `지역`: 전국 또는 17개 시·도  
+          - `인구`: 해당 연도의 총 인구 수  
+          - `출생아수(명)`: 해당 연도 출생아 수  
+          - `사망자수(명)`: 해당 연도 사망자 수  
+        """)
 
 
 
@@ -210,22 +213,29 @@ class EDA:
 
         # 파일 읽기 및 전처리
         df = pd.read_csv(pop_file)
-        df.replace("-", 0, inplace=True)
-        df[['인구', '출생아수(명)', '사망자수(명)']] = df[['인구', '출생아수(명)', '사망자수(명)']].fillna(0).astype(int)
 
+        # 결측치, 중복 확인
+        st.subheader("🔍 결측치 및 중복 데이터 확인")
+        missing = df.isin(["-", None]).sum().sum()
+        duplicates = df.duplicated().sum()
+        st.write(f"결측치 항목 수: {missing}")
+        st.write(f"중복 행 수: {duplicates}")
+
+        # '-'를 0으로, 숫자형 변환
+        for col in ['인구', '출생아수(명)', '사망자수(명)']:
+            df[col] = pd.to_numeric(df[col].replace('-', np.nan), errors='coerce').fillna(0).astype(int)
+
+        # 탭 구조
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "기초 통계", "연도별 추이", "지역별 분석", "변화량 분석", "시각화"
         ])
 
         with tab1:
-            st.subheader("📄 데이터 구조")
+            st.subheader("📄 데이터 구조 및 기초 통계")
             buf = io.StringIO()
             df.info(buf=buf)
             st.text(buf.getvalue())
-
-            st.subheader("📊 기초 통계")
             st.dataframe(df.describe())
-
             st.subheader("🧾 샘플 데이터")
             st.dataframe(df.head())
 
@@ -247,7 +257,7 @@ class EDA:
             st.pyplot(fig)
 
         with tab3:
-            st.subheader("📉 최근 5년간 지역별 인구 변화량 및 변화율")
+            st.subheader("📉 최근 5년간 지역별 인구 변화량 순위")
             years = sorted(df['연도'].unique())[-5:]
             pivot = df[df['연도'].isin(years) & (df['지역'] != '전국')].pivot(index='지역', columns='연도', values='인구')
             pivot['Change'] = (pivot[years[-1]] - pivot[years[0]]) // 1000
@@ -255,38 +265,42 @@ class EDA:
             pivot = pivot.sort_values('Change', ascending=False)
 
             fig, ax = plt.subplots(figsize=(8, 10))
-            sns.barplot(x='Change', y=pivot.index, ax=ax)
+            sns.barplot(x='Change', y=pivot.index, data=pivot.reset_index(), ax=ax)
             ax.set_title("Population Change (Last 5 Years)")
             ax.set_xlabel("Change (Thousands)")
+            for p in ax.patches:
+                ax.annotate(f"{int(p.get_width()):,}", (p.get_width(), p.get_y() + p.get_height()/2), va='center')
             st.pyplot(fig)
 
             fig2, ax2 = plt.subplots(figsize=(8, 10))
-            sns.barplot(x='ChangeRate', y=pivot.index, ax=ax2)
+            sns.barplot(x='ChangeRate', y=pivot.index, data=pivot.reset_index(), ax=ax2)
             ax2.set_title("Population Growth Rate (%)")
             ax2.set_xlabel("Change Rate (%)")
+            for p in ax2.patches:
+                ax2.annotate(f"{p.get_width():.2f}%", (p.get_width(), p.get_y() + p.get_height()/2), va='center')
             st.pyplot(fig2)
 
         with tab4:
             st.subheader("📌 인구 증감 상위 100 사례")
             df_sorted = df.sort_values(['지역', '연도'])
             df_sorted['증감'] = df_sorted.groupby('지역')['인구'].diff()
-            top100 = df_sorted[df_sorted['지역'] != '전국'].sort_values('증감', ascending=False).head(100)
+            top100 = df_sorted[df_sorted['지역'] != '전국'].nlargest(100, '증감')
             styled = top100.style.background_gradient(subset=['증감'], cmap='bwr').format({'증감': '{:,}'})
             st.dataframe(styled)
 
         with tab5:
-            st.subheader("🌈 지역별 인구 히트맵")
+            st.subheader("🌈 지역별 인구 히트맵 & 누적 영역그래프")
             pivot_heat = df.pivot(index='지역', columns='연도', values='인구')
             fig, ax = plt.subplots(figsize=(12, 8))
             sns.heatmap(pivot_heat, cmap='YlGnBu', ax=ax)
             st.pyplot(fig)
 
-            st.subheader("📊 누적 영역그래프")
             pivot_area = pivot_heat.T
             fig2, ax2 = plt.subplots(figsize=(12, 6))
             pivot_area.plot.area(ax=ax2, stacked=True)
             ax2.set_title("Population Stacked Area")
             st.pyplot(fig2)
+
 
 
 
