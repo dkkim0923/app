@@ -66,6 +66,7 @@ class Home:
           - `인구`, `출생아수(명)`, `사망자수(명)`: 연도별 인구 및 변동 정보
         """)
 
+
 # ---------------------
 # 로그인 페이지 클래스
 # ---------------------
@@ -223,7 +224,11 @@ class EDA:
             if not uploaded:
                 st.info("Bike 데이터(train.csv)를 업로드 해주세요.")
             else:
-                df = pd.read_csv(uploaded, parse_dates=['datetime'])
+                try:
+                    df = pd.read_csv(uploaded, parse_dates=['datetime'])
+                except ValueError:
+                    st.error("train.csv 파일에 'datetime' 컬럼이 없습니다.")
+                    return
 
                 st.subheader("1) 데이터 구조 및 요약")
                 buf = io.StringIO()
@@ -277,7 +282,6 @@ class EDA:
                 ax.set_xlabel("Year")
                 ax.set_ylabel("Population")
 
-                # 단순 예측
                 recent = nat.sort_values('연도').tail(3)
                 avg_delta = (recent['출생아수(명)'] - recent['사망자수(명)']).mean()
                 est_2035 = nat['인구'].iloc[-1] + (2035 - nat['연도'].iloc[-1]) * avg_delta
