@@ -46,25 +46,20 @@ class Home:
         if st.session_state.get("logged_in"):
             st.success(f"{st.session_state.get('user_email')}님 환영합니다.")
 
-        # 기존 Bike Sharing 데이터 설명
+        # Population Trends 데이터셋 출처 및 소개
         st.markdown("""
-        ---
-        **Bike Sharing Demand 데이터셋**  
-        - 제공처: [Kaggle Bike Sharing Demand Competition](https://www.kaggle.com/c/bike-sharing-demand)  
-        - 설명: 2011–2012년 워싱턴 D.C.의 시간별 자전거 대여량 기록  
-        """)
+                ---
+                **Population Trends 데이터셋**  
+                - 제공처: 통계청 KOSIS  
+                - 설명: 전국 및 시·도별 연도별 인구, 출생아 수, 사망자 수를 기록한 데이터  
+                - 주요 변수:  
+                  - `연도`: 기준 연도  
+                  - `지역`: 전국 또는 17개 시·도  
+                  - `인구`: 해당 연도의 총 인구 수  
+                  - `출생아수(명)`: 해당 연도 출생한 신생아 수  
+                  - `사망자수(명)`: 해당 연도 사망자 수  
+                """)
 
-        # 추가: Population Trends 데이터 설명
-        st.markdown("""
-        ---
-        **Population Trends 데이터셋**  
-        - 출처: 통계청  
-        - 설명: 전국 및 지역별 연도별 인구, 출생아수, 사망자수 데이터  
-        - 주요 변수:
-          - `연도`: 기준 연도  
-          - `지역`: 시·도 단위 지역명  
-          - `인구`, `출생아수(명)`, `사망자수(명)`: 연도별 인구 및 변동 정보
-        """)
 
 
 # ---------------------
@@ -206,129 +201,93 @@ class Logout:
 # ---------------------
 class EDA:
     def __init__(self):
-        st.title("📊 EDA 분석 페이지")
+        st.title("📊 지역별 인구 분석")
 
-        uploaded = st.file_uploader("Bike 데이터셋 업로드 (train.csv)", type="csv", key="bike")
-        pop_file = st.file_uploader("Population 데이터셋 업로드 (population_trends.csv)", type="csv", key="pop")
-
-        if not uploaded and not pop_file:
-            st.info("분석할 CSV 파일을 업로드하세요.")
+        pop_file = st.file_uploader("population_trends.csv 파일 업로드", type="csv")
+        if not pop_file:
+            st.info("population_trends.csv 파일을 업로드 해주세요.")
             return
 
-        tabs = st.tabs(["Bike Sharing EDA", "Population Trends EDA"])
+        # 파일 읽기 및 전처리
+        df = pd.read_csv(pop_file)
+        df.replace("-", 0, inplace=True)
+        df[['인구', '출생아수(명)', '사망자수(명)']] = df[['인구', '출생아수(명)', '사망자수(명)']].fillna(0).astype(int)
 
-        # -------------------------
-        # Bike 데이터 EDA (기존 유지)
-        # -------------------------
-        with tabs[0]:
-            if not uploaded:
-                st.info("Bike 데이터(train.csv)를 업로드 해주세요.")
-            else:
-                try:
-                    df = pd.read_csv(uploaded, parse_dates=['datetime'])
-                except ValueError:
-                    st.error("train.csv 파일에 'datetime' 컬럼이 없습니다.")
-                    return
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "기초 통계", "연도별 추이", "지역별 분석", "변화량 분석", "시각화"
+        ])
 
-                st.subheader("1) 데이터 구조 및 요약")
-                buf = io.StringIO()
-                df.info(buf=buf)
-                st.text(buf.getvalue())
-                st.dataframe(df.describe())
+        with tab1:
+            st.subheader("📄 데이터 구조")
+            buf = io.StringIO()
+            df.info(buf=buf)
+            st.text(buf.getvalue())
 
-                st.subheader("2) Datetime 파생")
-                df['year'] = df['datetime'].dt.year
-                df['month'] = df['datetime'].dt.month
-                df['hour'] = df['datetime'].dt.hour
-                df['dayofweek'] = df['datetime'].dt.dayofweek
-                st.dataframe(df[['datetime', 'year', 'month', 'hour', 'dayofweek']].head())
+            st.subheader("📊 기초 통계")
+            st.dataframe(df.describe())
 
-                st.subheader("3) 시각화 예시")
-                fig1, ax1 = plt.subplots()
-                sns.pointplot(x='hour', y='count', hue='workingday', data=df, ax=ax1)
-                ax1.set_title("Hourly Usage by Working Day")
-                st.pyplot(fig1)
+            st.subheader("🧾 샘플 데이터")
+            st.dataframe(df.head())
 
-        # -------------------------
-        # Population Trends 분석
-        # -------------------------
-        with tabs[1]:
-            if not pop_file:
-                st.info("population_trends.csv 파일을 업로드 해주세요.")
-                return
+        with tab2:
+            st.subheader("📈 전국 인구 연도별 추이 및 2035 예측")
+            nat = df[df['지역'] == '전국']
+            fig, ax = plt.subplots()
+            sns.lineplot(x='연도', y='인구', data=nat, marker='o', ax=ax)
+            ax.set_title("Population Trend by Year")
+            ax.set_xlabel("Year")
+            ax.set_ylabel("Population")
 
-            df = pd.read_csv(pop_file)
-            df.replace("-", 0, inplace=True)
-            df[['인구', '출생아수(명)', '사망자수(명)']] = df[['인구', '출생아수(명)', '사망자수(명)']].astype(int)
+            recent = nat.sort_values('연도').tail(3)
+            avg_delta = (recent['출생아수(명)'] - recent['사망자수(명)']).mean()
+            est_2035 = nat['인구'].iloc[-1] + (2035 - nat['연도'].iloc[-1]) * avg_delta
+            ax.axvline(2035, linestyle="--", color="gray")
+            ax.annotate(f"Est. 2035: {int(est_2035):,}", xy=(2035, est_2035), textcoords="offset points", xytext=(-40,10))
+            ax.plot(2035, est_2035, marker='o', color='red')
+            st.pyplot(fig)
 
-            tab1, tab2, tab3, tab4, tab5 = st.tabs(["기초 통계", "연도별 추이", "지역별 분석", "변화량 분석", "시각화"])
+        with tab3:
+            st.subheader("📉 최근 5년간 지역별 인구 변화량 및 변화율")
+            years = sorted(df['연도'].unique())[-5:]
+            pivot = df[df['연도'].isin(years) & (df['지역'] != '전국')].pivot(index='지역', columns='연도', values='인구')
+            pivot['Change'] = (pivot[years[-1]] - pivot[years[0]]) // 1000
+            pivot['ChangeRate'] = ((pivot[years[-1]] - pivot[years[0]]) / pivot[years[0]]) * 100
+            pivot = pivot.sort_values('Change', ascending=False)
 
-            with tab1:
-                st.subheader("📄 데이터 구조 정보")
-                buf = io.StringIO()
-                df.info(buf=buf)
-                st.text(buf.getvalue())
-                st.subheader("📊 요약 통계")
-                st.dataframe(df.describe())
-                st.subheader("🧾 샘플")
-                st.dataframe(df.head())
+            fig, ax = plt.subplots(figsize=(8, 10))
+            sns.barplot(x='Change', y=pivot.index, ax=ax)
+            ax.set_title("Population Change (Last 5 Years)")
+            ax.set_xlabel("Change (Thousands)")
+            st.pyplot(fig)
 
-            with tab2:
-                st.subheader("📈 전국 인구 연도별 추이")
-                nat = df[df['지역'] == '전국']
-                fig, ax = plt.subplots()
-                sns.lineplot(x='연도', y='인구', data=nat, marker='o', ax=ax)
-                ax.set_title("Population Trend by Year")
-                ax.set_xlabel("Year")
-                ax.set_ylabel("Population")
+            fig2, ax2 = plt.subplots(figsize=(8, 10))
+            sns.barplot(x='ChangeRate', y=pivot.index, ax=ax2)
+            ax2.set_title("Population Growth Rate (%)")
+            ax2.set_xlabel("Change Rate (%)")
+            st.pyplot(fig2)
 
-                recent = nat.sort_values('연도').tail(3)
-                avg_delta = (recent['출생아수(명)'] - recent['사망자수(명)']).mean()
-                est_2035 = nat['인구'].iloc[-1] + (2035 - nat['연도'].iloc[-1]) * avg_delta
-                ax.axvline(2035, linestyle="--", color="gray")
-                ax.annotate(f"Est. 2035: {int(est_2035):,}", xy=(2035, est_2035), textcoords="offset points", xytext=(-40,10))
-                ax.plot(2035, est_2035, marker='o', color='red')
-                st.pyplot(fig)
+        with tab4:
+            st.subheader("📌 인구 증감 상위 100 사례")
+            df_sorted = df.sort_values(['지역', '연도'])
+            df_sorted['증감'] = df_sorted.groupby('지역')['인구'].diff()
+            top100 = df_sorted[df_sorted['지역'] != '전국'].sort_values('증감', ascending=False).head(100)
+            styled = top100.style.background_gradient(subset=['증감'], cmap='bwr').format({'증감': '{:,}'})
+            st.dataframe(styled)
 
-            with tab3:
-                st.subheader("📉 최근 5년간 지역별 인구 변화량")
-                years = sorted(df['연도'].unique())[-5:]
-                pivot = df[df['연도'].isin(years) & (df['지역'] != '전국')].pivot(index='지역', columns='연도', values='인구')
-                pivot['변화량'] = pivot[years[-1]] - pivot[years[0]]
-                pivot['변화율(%)'] = ((pivot[years[-1]] - pivot[years[0]]) / pivot[years[0]]) * 100
-                pivot = pivot.sort_values('변화량', ascending=False)
+        with tab5:
+            st.subheader("🌈 지역별 인구 히트맵")
+            pivot_heat = df.pivot(index='지역', columns='연도', values='인구')
+            fig, ax = plt.subplots(figsize=(12, 8))
+            sns.heatmap(pivot_heat, cmap='YlGnBu', ax=ax)
+            st.pyplot(fig)
 
-                fig, ax = plt.subplots(figsize=(8, 10))
-                sns.barplot(x='변화량', y=pivot.index, ax=ax)
-                ax.set_title("Top Regional Change")
-                st.pyplot(fig)
+            st.subheader("📊 누적 영역그래프")
+            pivot_area = pivot_heat.T
+            fig2, ax2 = plt.subplots(figsize=(12, 6))
+            pivot_area.plot.area(ax=ax2, stacked=True)
+            ax2.set_title("Population Stacked Area")
+            st.pyplot(fig2)
 
-                fig2, ax2 = plt.subplots(figsize=(8, 10))
-                sns.barplot(x='변화율(%)', y=pivot.index, ax=ax2)
-                ax2.set_title("Top Regional Change Rate (%)")
-                st.pyplot(fig2)
-
-            with tab4:
-                st.subheader("📌 인구 증감 상위 100개 사례")
-                df_sorted = df.sort_values(['지역', '연도'])
-                df_sorted['증감'] = df_sorted.groupby('지역')['인구'].diff()
-                top100 = df_sorted[df_sorted['지역'] != '전국'].sort_values('증감', ascending=False).head(100)
-                styled = top100.style.background_gradient(subset=['증감'], cmap='bwr').format({'증감': '{:,}'})
-                st.dataframe(styled)
-
-            with tab5:
-                st.subheader("🌈 인구 히트맵")
-                pivot_heat = df.pivot(index='지역', columns='연도', values='인구')
-                fig, ax = plt.subplots(figsize=(12, 8))
-                sns.heatmap(pivot_heat, cmap='YlGnBu', ax=ax)
-                st.pyplot(fig)
-
-                st.subheader("📊 누적 영역그래프")
-                pivot_area = pivot_heat.T
-                fig2, ax2 = plt.subplots(figsize=(12, 6))
-                pivot_area.plot.area(ax=ax2, stacked=True)
-                ax2.set_title("Stacked Area by Region")
-                st.pyplot(fig2)
 
 
 
